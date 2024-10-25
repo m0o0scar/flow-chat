@@ -2,8 +2,11 @@
 
 import '@xyflow/react/dist/style.css';
 
+import { streamText } from 'ai';
 import { FC, useEffect, useState } from 'react';
+import Markdown from 'react-markdown';
 
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import Dagre from '@dagrejs/dagre';
 import {
   applyEdgeChanges,
@@ -26,56 +29,103 @@ interface AnswerNodeType extends Node {
   type: 'answer';
   data: {
     title?: string;
+    question?: string;
     content?: string;
   };
 }
 
+const google = createGoogleGenerativeAI({
+  apiKey: process.env.NEXT_PUBLIC_GOOGLE_GENAI_APIKEY,
+});
+const model = google('gemini-1.5-flash-latest');
+
 type CustomNodeTypes = AnswerNodeType;
 
 const AnswerNode: FC<NodeProps<AnswerNodeType>> = ({ id, data }) => {
-  const { addNodes, addEdges } = useReactFlow();
+  const { addNodes, setNodes, addEdges } = useReactFlow();
+
+  const [completed, setCompleted] = useState(false);
+
+  const addNewNode = (question: string) => {
+    const newNode: AnswerNodeType = {
+      id: `node-${Math.random()}`,
+      type: 'answer',
+      position: { x: 0, y: 0 },
+      data: {
+        question,
+      },
+    };
+
+    const newEdge: Edge = {
+      id: `edge-${Math.random()}`,
+      source: id,
+      target: newNode.id,
+      label: question,
+    };
+
+    addNodes(newNode);
+    addEdges(newEdge);
+  };
+
+  const updateContent = (content: string) => {
+    setNodes((values) =>
+      values.map((node) => {
+        if (node.id === id) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              content,
+            },
+          };
+        }
+        return node;
+      }),
+    );
+  };
 
   const handleAddQuestion = () => {
     const question = prompt('What is your question?');
-    if (question) {
-      const newNode: AnswerNodeType = {
-        id: `node-${Math.random()}`,
-        type: 'answer',
-        position: { x: 0, y: 0 },
-        data: {
-          title: question,
-        },
-      };
-
-      const newEdge: Edge = {
-        id: `edge-${Math.random()}`,
-        source: id,
-        target: newNode.id,
-        label: question,
-      };
-
-      addNodes(newNode);
-      addEdges(newEdge);
-    }
+    if (question) addNewNode(question);
   };
+
+  useEffect(() => {
+    (async () => {
+      if (data.question && !data.content) {
+        let content = '';
+        const result = await streamText({
+          model,
+          temperature: 0,
+          prompt: data.question,
+        });
+        for await (const text of result.textStream) {
+          content += text;
+          updateContent(content);
+        }
+      }
+      setCompleted(true);
+    })();
+  }, [data.question]);
 
   return (
     <>
       <div
-        className="card bg-base-100 max-w-80 border shadow-lg"
+        className="card bg-base-100 max-w-[600px] border shadow-lg"
         id={`node-${id}`}
       >
         <div className="card-body p-4">
           {data.title && <h2 className="card-title">{data.title}</h2>}
-          {data.content && <p>{data.content}</p>}
-          <div className="card-actions justify-end">
-            <button
-              className="btn btn-xs btn-primary"
-              onClick={handleAddQuestion}
-            >
-              Ask
-            </button>
-          </div>
+          {data.content && <Markdown>{data.content}</Markdown>}
+          {completed && (
+            <div className="card-actions justify-end">
+              <button
+                className="btn btn-xs btn-primary"
+                onClick={handleAddQuestion}
+              >
+                Ask
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -95,7 +145,7 @@ const nodeTypes: NodeTypes = {
 const initialNodes: CustomNodeTypes[] = [
   {
     id: '1',
-    data: { content: 'this is the starting node' },
+    data: {},
     position: { x: 0, y: 0 },
     type: 'answer',
   },
@@ -171,7 +221,6 @@ export function FlowDemo() {
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        fitView
       >
         <Background />
         <Controls />
