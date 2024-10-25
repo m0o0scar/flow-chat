@@ -10,6 +10,7 @@ import {
 } from 'ai';
 import { FC, useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import {
@@ -164,7 +165,10 @@ const AnswerNode: FC<NodeProps<AnswerNodeType>> = ({
         <div className="card-body p-4">
           {data.title && <h2 className="card-title">{data.title}</h2>}
           {data.content && (
-            <Markdown className="prose-sm max-h-[500px] overflow-y-auto nowheel">
+            <Markdown
+              remarkPlugins={[remarkGfm]}
+              className="prose-sm max-h-[500px] overflow-y-auto nowheel"
+            >
               {data.content}
             </Markdown>
           )}
