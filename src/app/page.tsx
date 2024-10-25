@@ -1,3 +1,5 @@
+import { FlowDemo } from '@/components/FlowDemo';
+
 export default function Home() {
-  return <div className="p-4">Hi</div>;
+  return <FlowDemo />;
 }
