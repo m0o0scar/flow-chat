@@ -30,6 +30,8 @@ import {
   useReactFlow,
 } from '@xyflow/react';
 
+const gridSize = 20;
+
 interface AnswerNodeType extends Node {
   type: 'answer';
   data: {
@@ -54,15 +56,38 @@ const AnswerNode: FC<NodeProps<AnswerNodeType>> = ({
   width = 0,
   data,
 }) => {
-  const { addNodes, setNodes, addEdges, getNode } = useReactFlow();
+  const {
+    addNodes,
+    setNodes,
+    addEdges,
+    getNode,
+    setCenter,
+    getIntersectingNodes,
+  } = useReactFlow();
 
   const [completed, setCompleted] = useState(false);
 
   const addNewNode = (question: string) => {
+    let x = Math.round((positionAbsoluteX + width + 200) / gridSize) * gridSize;
+    let y = Math.round(positionAbsoluteY / gridSize) * gridSize;
+
+    const intersectingNodes = getIntersectingNodes({
+      x,
+      y,
+      width: 100,
+      height: 100,
+    });
+
+    if (intersectingNodes[0]?.measured?.height) {
+      y =
+        Math.round((y + intersectingNodes[0].measured.height + 30) / gridSize) *
+        gridSize;
+    }
+
     const newNode: AnswerNodeType = {
       id: `node-${Math.random()}`,
       type: 'answer',
-      position: { x: positionAbsoluteX + width + 200, y: positionAbsoluteY },
+      position: { x, y },
       data: {
         question,
         parentId: id,
@@ -78,6 +103,10 @@ const AnswerNode: FC<NodeProps<AnswerNodeType>> = ({
 
     addNodes(newNode);
     addEdges(newEdge);
+
+    const cx = (window.innerWidth - 500) / 2 + x;
+    const cy = window.innerHeight / 2 - 50 + y;
+    setCenter(cx, cy);
   };
 
   const getConversationHistory = () => {
@@ -224,13 +253,13 @@ export function FlowDemo() {
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        snapGrid={[50, 50]}
+        snapGrid={[gridSize, gridSize]}
         snapToGrid
         minZoom={0.2}
         maxZoom={1}
         fitView
       >
-        <Background />
+        <Background gap={gridSize} />
         <Controls />
       </ReactFlow>
     </div>
