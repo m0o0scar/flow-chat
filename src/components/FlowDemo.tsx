@@ -85,7 +85,7 @@ const AnswerNode: FC<NodeProps<AnswerNodeType>> = ({
     let parentId = data.parentId;
     while (parentId) {
       const node = getNode(parentId);
-      if (node) nodes.push(node);
+      if (node) nodes.unshift(node);
       parentId = (node?.data as CustomNodeTypes['data']).parentId;
     }
 
