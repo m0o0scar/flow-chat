@@ -2,12 +2,16 @@
 
 import '@xyflow/react/dist/style.css';
 
-import { streamText } from 'ai';
+import {
+  CoreAssistantMessage,
+  CoreMessage,
+  CoreUserMessage,
+  streamText,
+} from 'ai';
 import { FC, useEffect, useState } from 'react';
 import Markdown from 'react-markdown';
 
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import Dagre from '@dagrejs/dagre';
 import {
   applyEdgeChanges,
   applyNodeChanges,
@@ -31,6 +35,7 @@ interface AnswerNodeType extends Node {
     title?: string;
     question?: string;
     content?: string;
+    parentId?: string;
   };
 }
 
@@ -41,8 +46,14 @@ const model = google('gemini-1.5-flash-latest');
 
 type CustomNodeTypes = AnswerNodeType;
 
-const AnswerNode: FC<NodeProps<AnswerNodeType>> = ({ id, data }) => {
-  const { addNodes, setNodes, addEdges } = useReactFlow();
+const AnswerNode: FC<NodeProps<AnswerNodeType>> = ({
+  id,
+  positionAbsoluteX,
+  positionAbsoluteY,
+  width = 0,
+  data,
+}) => {
+  const { addNodes, setNodes, addEdges, getNode } = useReactFlow();
 
   const [completed, setCompleted] = useState(false);
 
@@ -50,14 +61,15 @@ const AnswerNode: FC<NodeProps<AnswerNodeType>> = ({ id, data }) => {
     const newNode: AnswerNodeType = {
       id: `node-${Math.random()}`,
       type: 'answer',
-      position: { x: 0, y: 0 },
+      position: { x: positionAbsoluteX + width + 200, y: positionAbsoluteY },
       data: {
         question,
+        parentId: id,
       },
     };
 
     const newEdge: Edge = {
-      id: `edge-${Math.random()}`,
+      id: `edge-${id}-${newNode.id}`,
       source: id,
       target: newNode.id,
       label: question,
@@ -65,6 +77,34 @@ const AnswerNode: FC<NodeProps<AnswerNodeType>> = ({ id, data }) => {
 
     addNodes(newNode);
     addEdges(newEdge);
+  };
+
+  const getConversationHistory = () => {
+    const nodes: Node[] = [];
+    let parentId = data.parentId;
+    while (parentId) {
+      const node = getNode(parentId);
+      if (node) nodes.push(node);
+      parentId = (node?.data as CustomNodeTypes['data']).parentId;
+    }
+
+    const messages: CoreMessage[] = [];
+    nodes.forEach((node) => {
+      const { question, content } = node.data as CustomNodeTypes['data'];
+      if (question && content) {
+        const userMessage: CoreUserMessage = {
+          role: 'user',
+          content: question,
+        };
+        const aiMessage: CoreAssistantMessage = {
+          role: 'assistant',
+          content: content,
+        };
+        messages.push(userMessage, aiMessage);
+      }
+    });
+
+    return messages;
   };
 
   const updateContent = (content: string) => {
@@ -93,11 +133,19 @@ const AnswerNode: FC<NodeProps<AnswerNodeType>> = ({ id, data }) => {
     (async () => {
       if (data.question && !data.content) {
         let content = '';
+
+        const messages: CoreMessage[] = [
+          ...getConversationHistory(),
+          { role: 'user', content: data.question },
+        ];
+        console.log('messages:', messages);
+
         const result = await streamText({
           model,
           temperature: 0,
-          prompt: data.question,
+          messages,
         });
+
         for await (const text of result.textStream) {
           content += text;
           updateContent(content);
@@ -115,7 +163,11 @@ const AnswerNode: FC<NodeProps<AnswerNodeType>> = ({ id, data }) => {
       >
         <div className="card-body p-4">
           {data.title && <h2 className="card-title">{data.title}</h2>}
-          {data.content && <Markdown>{data.content}</Markdown>}
+          {data.content && (
+            <Markdown className="prose-sm max-h-[500px] overflow-y-auto nowheel">
+              {data.content}
+            </Markdown>
+          )}
           {completed && (
             <div className="card-actions justify-end">
               <button
@@ -151,50 +203,6 @@ const initialNodes: CustomNodeTypes[] = [
   },
 ];
 
-const getLayoutedElements = (nodes: CustomNodeTypes[], edges: Edge[]) => {
-  const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: 'LR' });
-
-  const rects: Record<string, DOMRect> = {};
-  const getRect = (id: string) => {
-    if (!rects[id]) {
-      const rect = document
-        .getElementById(`node-${id}`)!
-        .getBoundingClientRect();
-      rects[id] = rect;
-    }
-    return rects[id];
-  };
-
-  edges.forEach((edge) => {
-    g.setEdge(edge.source, edge.target);
-  });
-  nodes.forEach((node) => {
-    const { width, height } = getRect(node.id);
-    g.setNode(node.id, {
-      ...node,
-      width,
-      height,
-    });
-  });
-
-  Dagre.layout(g);
-
-  return {
-    nodes: nodes.map((node) => {
-      const position = g.node(node.id);
-      const { width, height } = getRect(node.id);
-      // We are shifting the dagre node position (anchor=center center) to the top left
-      // so it matches the React Flow node anchor point (top left).
-      const x = position.x - width / 2;
-      const y = position.y - height / 2;
-
-      return { ...node, position: { x, y } };
-    }),
-    edges,
-  };
-};
-
 export function FlowDemo() {
   const [nodes, setNodes] = useState<CustomNodeTypes[]>(initialNodes);
   const [edges, setEdges] = useState<Edge[]>([]);
@@ -204,15 +212,6 @@ export function FlowDemo() {
   const onEdgesChange: OnEdgesChange = (changes) =>
     setEdges((eds) => applyEdgeChanges(changes, eds));
 
-  useEffect(() => {
-    setTimeout(() => {
-      const layouted = getLayoutedElements(nodes, edges);
-      setNodes([...layouted.nodes]);
-      setEdges([...layouted.edges]);
-      console.log('layout');
-    }, 0);
-  }, [edges.length]);
-
   return (
     <div className="absolute left-0 right-0 top-0 bottom-0">
       <ReactFlow
@@ -221,6 +220,11 @@ export function FlowDemo() {
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        snapGrid={[50, 50]}
+        snapToGrid
+        minZoom={0.2}
+        maxZoom={1}
+        fitView
       >
         <Background />
         <Controls />
